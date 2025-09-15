@@ -21,7 +21,7 @@ async def start(client, message):
         )
     rm = InlineKeyboardMarkup(
         [[
-            InlineKeyboardButton("✨ Update Channel", url="https://t.me/vj_botz")
+            InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")
         ]]
     )
     await client.send_message(
