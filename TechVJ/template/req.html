@@ -368,11 +368,24 @@
         const videolink = window.location.href;
         const  lazyLink = videolink.replace("/watch/", "/");
 
-        function vlc_player() {
-            const openLazyLink = lazyLink;
-            const openVlc = `vlc://${openLazyLink}`;
-            window.location.href = openVlc;
-        }
+        // function vlc_player() {
+        //     const openLazyLink = lazyLink;
+        //     const openVlc = `vlc://${openLazyLink}`;
+        //     window.location.href = openVlc;
+        // }
+		function vlc_player() {
+		    const openLazyLink = lazyLink;
+		    const vlcIntent = `intent:${openLazyLink}#Intent;package=org.videolan.vlc;end`;
+		    const vlcScheme = `vlc://${openLazyLink}`;
+		
+		    // Detect if Android
+		    if (/Android/i.test(navigator.userAgent)) {
+		        window.location.href = vlcIntent;
+		    } else {
+		        window.location.href = vlcScheme;
+		    }
+		}
+
 	    
 	function mx_player() {
             const openLazyLink = lazyLink;
@@ -416,5 +429,6 @@
 </html>
 
 <!--  Don't Remove Credit @VJ_Bot Subscribe YouTube Channel For Amazing Bot @Tech_VJ Ask Doubt on telegram @KingVJ01 -->
+
 
 
