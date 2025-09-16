@@ -4,13 +4,10 @@ from flask import Flask, Response, abort, send_file
 
 app = Flask(__name__)
 
-# Folder where your bot stores files from Telegram
+# Folder where your bot saves Telegram files
 DOWNLOAD_DIR = "downloads"
 
 def get_file_path(file_id, filename):
-    """
-    Build the local path for a file using file_id and filename.
-    """
     return os.path.join(DOWNLOAD_DIR, f"{file_id}_{filename}")
 
 @app.route("/")
@@ -23,23 +20,19 @@ def watch(file_id, filename):
     Stream video with audio transcoded to AAC for browser compatibility.
     """
     file_path = get_file_path(file_id, filename)
-
     if not os.path.exists(file_path):
         return abort(404, "File not found")
 
-    # FFmpeg command:
-    # - Copy video (keep original)
-    # - Transcode audio to AAC
-    # - Output to MP4 container for HTML5 browser playback
+    # FFmpeg command: keep video, transcode audio to AAC
     command = [
         "ffmpeg",
         "-i", file_path,
-        "-c:v", "copy",      # keep original video stream
+        "-c:v", "copy",      # keep original video (AV1, H.265, H.264)
         "-c:a", "aac",       # convert audio to AAC
-        "-b:a", "192k",      # set audio bitrate
+        "-b:a", "192k",
         "-movflags", "+faststart",
         "-f", "mp4",
-        "pipe:1"             # output to stdout
+        "pipe:1"
     ]
 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -49,10 +42,9 @@ def watch(file_id, filename):
 @app.route("/download/<file_id>/<filename>")
 def download(file_id, filename):
     """
-    Direct file download without transcoding.
+    Direct download of original file.
     """
     file_path = get_file_path(file_id, filename)
-
     if not os.path.exists(file_path):
         return abort(404, "File not found")
 
