@@ -1,12 +1,12 @@
-# Base image (use bullseye instead of buster)
+# Base image
 FROM python:3.10.8-slim-bullseye
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update packages and install git
+# Update packages and install git + ffmpeg
 RUN apt-get update && apt-get upgrade -y && \
-    apt-get install -y git && \
+    apt-get install -y git ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy requirements.txt first (for Docker cache)
@@ -23,5 +23,9 @@ WORKDIR /FileToLink
 # Copy all project files
 COPY . /FileToLink
 
-# Run the bot
-CMD ["python", "bot.py"]
+# Ensure downloads and transcoded folders exist
+RUN mkdir -p downloads transcoded
+
+# Run both bot and Flask server
+# You can use "sh -c" to start both processes
+CMD sh -c "python bot.py & gunicorn app:app --bind 0.0.0.0:5000"
