@@ -28,4 +28,5 @@ RUN mkdir -p downloads transcoded
 
 # Run both bot and Flask server
 # You can use "sh -c" to start both processes
-CMD sh -c "python bot.py & gunicorn app:app --bind 0.0.0.0:5000"
+#CMD sh -c "python bot.py & gunicorn app:app --bind 0.0.0.0:5000"
+
