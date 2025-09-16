@@ -4,11 +4,40 @@ from flask import Flask, Response, abort, send_file
 
 app = Flask(__name__)
 
-# Folder where your bot saves Telegram files
 DOWNLOAD_DIR = "downloads"
+TRANSCODE_DIR = "transcoded"  # Pre-transcoded files go here
+
+# Ensure transcoded directory exists
+os.makedirs(TRANSCODE_DIR, exist_ok=True)
 
 def get_file_path(file_id, filename):
     return os.path.join(DOWNLOAD_DIR, f"{file_id}_{filename}")
+
+def get_transcoded_path(file_id, filename):
+    name, _ = os.path.splitext(filename)
+    return os.path.join(TRANSCODE_DIR, f"{file_id}_{name}.mp4")
+
+def pre_transcode(file_id, filename):
+    """
+    Transcode audio to AAC for browser playback.
+    Returns path to transcoded file.
+    """
+    input_path = get_file_path(file_id, filename)
+    output_path = get_transcoded_path(file_id, filename)
+
+    if not os.path.exists(output_path):
+        # FFmpeg command: copy video, convert audio to AAC
+        command = [
+            "ffmpeg",
+            "-i", input_path,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return output_path
 
 @app.route("/")
 def home():
@@ -17,37 +46,21 @@ def home():
 @app.route("/watch/<file_id>/<filename>")
 def watch(file_id, filename):
     """
-    Stream video with audio transcoded to AAC for browser compatibility.
+    Serve pre-transcoded MP4 for streaming.
     """
-    file_path = get_file_path(file_id, filename)
-    if not os.path.exists(file_path):
+    transcoded_path = pre_transcode(file_id, filename)
+    if not os.path.exists(transcoded_path):
         return abort(404, "File not found")
-
-    # FFmpeg command: keep video, transcode audio to AAC
-    command = [
-        "ffmpeg",
-        "-i", file_path,
-        "-c:v", "copy",      # keep original video (AV1, H.265, H.264)
-        "-c:a", "aac",       # convert audio to AAC
-        "-b:a", "192k",
-        "-movflags", "+faststart",
-        "-f", "mp4",
-        "pipe:1"
-    ]
-
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
-    return Response(process.stdout, mimetype="video/mp4", direct_passthrough=True)
+    return send_file(transcoded_path, mimetype="video/mp4")
 
 @app.route("/download/<file_id>/<filename>")
 def download(file_id, filename):
     """
-    Direct download of original file.
+    Serve original file for download.
     """
     file_path = get_file_path(file_id, filename)
     if not os.path.exists(file_path):
         return abort(404, "File not found")
-
     return send_file(file_path, as_attachment=True, download_name=filename)
 
 if __name__ == "__main__":
