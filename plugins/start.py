@@ -165,6 +165,7 @@ async def stream_start(client, message):
             [[
                 InlineKeyboardButton("🚀 Fast Download 🚀", url=download),
                 InlineKeyboardButton("🖥 Watch online 🖥", url=stream)
+             [  InlineKeyboardButton("📢 Join Our Channel", url="https://t.me/trendi_Backup")]
             ]]
         )
     )
@@ -175,6 +176,7 @@ async def stream_start(client, message):
             [
                 InlineKeyboardButton("sᴛʀᴇᴀᴍ 🖥", url=stream),
                 InlineKeyboardButton("ᴅᴏᴡɴʟᴏᴀᴅ 📥", url=download)
+            [   InlineKeyboardButton("📢 Join Our Channel", url="https://t.me/trendi_Backup")]
             ]
         ]
     )
