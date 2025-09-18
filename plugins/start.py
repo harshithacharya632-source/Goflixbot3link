@@ -2,20 +2,20 @@ import asyncio
 import humanize
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from utils import temp, get_shortlink
+from ffmpeg_utils import ensure_multi_audio_mp4  # <- your FFmpeg multi-audio fix
 from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
-from ffmpeg_utils import ensure_multi_audio_mp4  # <- our fixed FFmpeg util
-from info import URL, LOG_CHANNEL, SHORTLINK
+from utils import temp, get_shortlink
 from database.users_chats_db import db
+from info import URL, LOG_CHANNEL, SHORTLINK
 
-app = Client(
-    "TechVJBot",
-    api_id=123456,           # <-- Replace with your API_ID
-    api_hash="YOUR_API_HASH",# <-- Replace with your API_HASH
-    bot_token="YOUR_BOT_TOKEN" # <-- Replace with your bot token
-)
+# ---------- BOT CONFIG ----------
+api_id = 123456            # replace with your API_ID
+api_hash = "YOUR_API_HASH" # replace with your API_HASH
+bot_token = "YOUR_BOT_TOKEN" # replace with your bot token
 
-# ---------- START COMMAND ----------
+app = Client("TechVJBot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
+
+# ---------- /start COMMAND ----------
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     if not await db.is_user_exist(message.from_user.id):
@@ -25,11 +25,8 @@ async def start(client, message):
         [[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]]
     )
 
-    await message.reply(
-        text=(
-            f"Hi {message.from_user.mention}!\n"
-            f"Welcome to {temp.B_NAME} Bot."
-        ),
+    await message.reply_text(
+        f"Hi {message.from_user.mention}!\nWelcome to {temp.B_NAME} Bot.",
         reply_markup=rm,
         parse_mode=enums.ParseMode.HTML
     )
@@ -37,26 +34,24 @@ async def start(client, message):
 # ---------- FILE HANDLER ----------
 @app.on_message(filters.private & (filters.document | filters.video))
 async def handle_file(client, message):
-    # Get the actual file
-    if message.video:
-        file = message.video
-    elif message.document:
-        file = message.document
-    else:
-        await message.reply("Unsupported file type!")
+    file = message.video or message.document
+    if not file:
+        await message.reply_text("❌ Unsupported file type!")
         return
 
-    await message.reply_text("✅ Received file. Converting... please wait.")
+    await message.reply_text("✅ Received file. Converting to multi-audio MP4...")
 
-    file_path = await client.download_media(file)
+    # Download the file
+    input_path = await client.download_media(file)
+
     try:
-        # Convert with multi-audio support
-        converted_path = ensure_multi_audio_mp4(file_path)
+        # Convert keeping all audio tracks
+        output_path = ensure_multi_audio_mp4(input_path)
     except Exception as e:
-        await message.reply_text(f"❌ Conversion failed: {e}")
+        await message.reply_text(f"❌ Conversion failed:\n{e}")
         return
 
-    # Generate links (if you have URL setup)
+    # Generate links (optional)
     if SHORTLINK:
         stream_link = await get_shortlink(f"{URL}/watch/{file.file_id}/{get_name(file)}")
         download_link = await get_shortlink(f"{URL}/download/{file.file_id}/{get_name(file)}")
@@ -64,19 +59,19 @@ async def handle_file(client, message):
         stream_link = f"{URL}/watch/{file.file_id}/{get_name(file)}"
         download_link = f"{URL}/download/{file.file_id}/{get_name(file)}"
 
-    # Reply with buttons
+    # Reply with converted file
     rm = InlineKeyboardMarkup([
         [InlineKeyboardButton("🖥 Watch online 🖥", url=stream_link)],
         [InlineKeyboardButton("📥 Download 📥", url=download_link)]
     ])
 
     await message.reply_document(
-        converted_path,
+        output_path,
         caption="✅ Here is your multi-audio MP4 file!",
         reply_markup=rm
     )
 
 # ---------- RUN BOT ----------
 if __name__ == "__main__":
-    print("Bot started...")
+    print("Bot is starting...")
     app.run()
