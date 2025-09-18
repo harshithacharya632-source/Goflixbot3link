@@ -1,53 +1,66 @@
+# ffmpeg_utils.py
 import subprocess
 from pathlib import Path
 import json
 
 def ffprobe_streams(path):
-    """Get streams info as JSON"""
+    """
+    Returns the streams information of a media file as a JSON dict.
+    """
     cmd = ["ffprobe", "-v", "error", "-show_streams", "-print_format", "json", str(path)]
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if p.returncode != 0:
         raise RuntimeError(f"ffprobe failed: {p.stderr.decode(errors='ignore')}")
     return json.loads(p.stdout or b"{}")
 
+def has_audio_stream(path):
+    info = ffprobe_streams(path)
+    return any(s.get("codec_type") == "audio" for s in info.get("streams", []))
 
-def ensure_multi_audio_mp4(input_path, output_dir="converted"):
+def ensure_multi_audio_mp4(input_path, bitrate="128k"):
     """
-    Convert input video/audio to MP4 and **preserve all audio streams** in AAC.
-    Output is saved in output_dir.
-    Returns output file path.
+    Converts input media to MP4, keeping all video and audio streams.
+    Audio will be transcoded to AAC if not already.
+    Returns the output file path.
     """
-    input_path = Path(input_path)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
-    output_path = output_dir / f"{input_path.stem}_multi_audio.mp4"
+    input_path = str(input_path)
+    output_path = str(Path(input_path).with_suffix(".mp4"))
 
+    # ffprobe info
     info = ffprobe_streams(input_path)
-    has_audio = any(s.get("codec_type") == "audio" for s in info.get("streams", []))
+    streams = info.get("streams", [])
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
 
-    if has_audio:
-        # Map all streams: video + all audio + subtitles if present
+    if not audio_streams:
+        # No audio, just copy video
         cmd = [
-            "ffmpeg", "-y", "-i", str(input_path),
-            "-map", "0",  # map all streams
+            "ffmpeg", "-y", "-i", input_path,
             "-c:v", "copy",
-            "-c:a", "aac",  # convert all audio streams to AAC
-            "-c:s", "copy", # copy subtitles if any
             "-movflags", "+faststart",
-            str(output_path)
+            output_path
         ]
     else:
-        # No audio: just copy video
-        cmd = [
-            "ffmpeg", "-y", "-i", str(input_path),
-            "-c:v", "copy",
-            "-movflags", "+faststart",
-            str(output_path)
-        ]
+        # Map all streams
+        cmd = ["ffmpeg", "-y", "-i", input_path]
 
-    print("Running FFmpeg:", " ".join(cmd))
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg failed: {result.stderr.decode(errors='ignore')}")
+        # Map all streams explicitly
+        cmd += ["-map", "0"]
 
-    return str(output_path)
+        # Video: copy
+        cmd += ["-c:v", "copy"]
+
+        # Audio: transcode to AAC for compatibility
+        cmd += ["-c:a", "aac", "-b:a", bitrate]
+
+        # Faststart for streaming
+        cmd += ["-movflags", "+faststart"]
+
+        # Output path
+        cmd += [output_path]
+
+    # Run ffmpeg
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {p.stderr.decode(errors='ignore')}")
+
+    return output_path
