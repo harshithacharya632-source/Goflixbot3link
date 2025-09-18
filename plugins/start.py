@@ -1,5 +1,6 @@
 # start.py
 import os
+import asyncio
 import humanize
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -13,7 +14,7 @@ from info import URL, LOG_CHANNEL, SHORTLINK
 from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
 from TechVJ.util.human_readable import humanbytes
 from database.users_chats_db import db
-from ffmpeg_utils import ensure_multi_audio_mp4
+from ffmpeg_utils import ensure_multi_audio_mp4  # <-- Your multi-audio ffmpeg handler
 
 # -------------------------------
 # Read credentials from environment
@@ -122,6 +123,17 @@ async def stream_start(client, message):
     os.remove(local_path)
 
 # -------------------------------
-# Run the bot
+# Run bot properly in existing event loop
 # -------------------------------
-bot.run()
+async def main():
+    await bot.start()
+    print("Bot started!")
+    await bot.idle()  # keep it running
+
+# For environments with an already running loop (Render, Jupyter)
+try:
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+except RuntimeError:
+    # fallback if no running loop
+    asyncio.run(main())
