@@ -4,9 +4,9 @@ FROM python:3.10.8-slim-bullseye
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update packages and install git + ffmpeg 🔥
+# Update packages and install git + ffmpeg
 RUN apt-get update && apt-get upgrade -y && \
-    apt-get install -y git ffmpeg && \   # 🔥 add ffmpeg here
+    apt-get install -y git ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy requirements.txt first (for Docker cache)
