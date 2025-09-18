@@ -16,13 +16,23 @@ from database.users_chats_db import db
 from ffmpeg_utils import ensure_multi_audio_mp4
 
 # -------------------------------
-# Initialize the bot client
+# Read credentials from environment
+# -------------------------------
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+API_ID = int(os.environ.get("API_ID", 0))
+API_HASH = os.environ.get("API_HASH")
+
+if not BOT_TOKEN or not API_ID or not API_HASH:
+    raise ValueError("Bot credentials are missing. Set BOT_TOKEN, API_ID, and API_HASH as environment variables.")
+
+# -------------------------------
+# Initialize Pyrogram client
 # -------------------------------
 bot = Client(
     "GoflixBot",
-    bot_token="YOUR_BOT_TOKEN",
-    api_id=YOUR_API_ID,
-    api_hash="YOUR_API_HASH"
+    bot_token=BOT_TOKEN,
+    api_id=API_ID,
+    api_hash=API_HASH
 )
 
 # -------------------------------
@@ -98,7 +108,7 @@ async def stream_start(client, message):
     msg_text = f"""<i><u>𝗬𝗼𝘂𝗿 𝗟𝗶𝗻𝗸 𝗚𝗲𝗻𝗲ʀ𝗮ᴛ𝗲𝗱 !</u></i>\n\n
 <b>📂 Fɪʟᴇ ɴᴀᴍᴇ :</b> <i>{Path(converted_path).name}</i>\n
 <b>📦 Fɪʟᴇ ꜱɪᴢᴇ :</b> <i>{humanbytes(get_media_file_size(message))}</i>\n
-<b>🚸 Nᴏᴛᴇ : Goflix ʟɪɴᴋ ᴇxᴘɪʀᴇ 24 HOURS</b>"""
+<b>🚸 Nᴏᴛᴇ : ʟɪɴᴋ ᴡᴏɴ'ᴛ ᴇxᴘɪʀᴇ 24 HOURS</b>"""
 
     await message.reply_text(
         text=msg_text,
