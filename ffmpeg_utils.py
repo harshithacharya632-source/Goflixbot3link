@@ -1,42 +1,68 @@
-def ensure_audio_aac(input_path, output_path, bitrate="128k"):
-    """
-    Ensures output_path has AAC audio in an MP4 container.
-    If input already has AAC audio + MP4, remux fast.
-    Otherwise, transcode audio to AAC and copy video.
-    If no audio, just copy video into MP4.
-    """
-    input_path = str(input_path)
-    # Always force .mp4 output for compatibility
-    output_path = str(Path(output_path).with_suffix(".mp4"))
+# ffmpeg_utils.py
+import subprocess, json
+from pathlib import Path
 
-    codec = first_audio_codec(input_path)
+def ffprobe_streams(path):
+    cmd = ["ffprobe", "-v", "error", "-show_streams", "-print_format", "json", str(path)]
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {p.stderr.decode(errors='ignore')}")
+    return json.loads(p.stdout or b"{}")
 
-    if codec == "aac":
-        # Already AAC – just remux (fast)
+def has_audio_stream(path):
+    info = ffprobe_streams(path)
+    for s in info.get("streams", []):
+        if s.get("codec_type") == "audio":
+            return True
+    return False
+
+def first_audio_codec(path):
+    info = ffprobe_streams(path)
+    for s in info.get("streams", []):
+        if s.get("codec_type") == "audio":
+            return s.get("codec_name", "").lower()
+    return ""
+
+def run_ffmpeg(cmd):
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {p.stderr.decode(errors='ignore')}")
+    return p
+
+def ensure_audio_aac(input_path, output_dir=None, bitrate="128k"):
+    """
+    Ensures output_path has all audio streams in AAC inside an MP4 container,
+    keeps original file name, handles multi-language audio, and works if no audio exists.
+    """
+    input_path = Path(input_path)
+    output_dir = Path(output_dir) if output_dir else input_path.parent
+    output_path = output_dir / f"{input_path.stem}.mp4"  # preserve original name
+
+    # Probe audio streams
+    info = ffprobe_streams(str(input_path))
+    audio_streams = [s for s in info.get("streams", []) if s.get("codec_type") == "audio"]
+
+    if not audio_streams:
+        # No audio – just copy video
         cmd = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-map", "0:v:0", "-map", "0:a:0?",
-            "-c:v", "copy", "-c:a", "copy",
-            "-movflags", "+faststart",
-            output_path
-        ]
-    elif codec:  
-        # Has audio but not AAC – transcode only audio
-        cmd = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-map", "0:v:0", "-map", "0:a:0",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", bitrate,
-            "-movflags", "+faststart",
-            output_path
-        ]
-    else:
-        # No audio stream – just copy video into mp4
-        cmd = [
-            "ffmpeg", "-y", "-i", input_path,
+            "ffmpeg", "-y", "-i", str(input_path),
             "-map", "0:v:0",
             "-c:v", "copy",
             "-movflags", "+faststart",
-            output_path
+            str(output_path)
+        ]
+    else:
+        # Map video + all audio streams
+        cmd = [
+            "ffmpeg", "-y", "-i", str(input_path),
+            "-map", "0:v:0",
+            "-map", "0:a",               # include all audio tracks
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", bitrate,
+            "-movflags", "+faststart",
+            str(output_path)
         ]
 
-    return run_ffmpeg(cmd)
+    run_ffmpeg(cmd)
+    return str(output_path)
