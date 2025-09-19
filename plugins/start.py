@@ -1,102 +1,78 @@
-# File: plugins/start.py
-
 import os
 import asyncio
-import logging
 import subprocess
-from pathlib import Path
+import humanize
+from pyrogram import Client, filters, enums
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from urllib.parse import quote_plus
 
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+# Config
+API_ID = int(os.environ.get("API_ID", 12345))
+API_HASH = os.environ.get("API_HASH", "your_api_hash")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "your_bot_token")
+URL = os.environ.get("URL", "https://goflixlink.onrender.com")
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", -1001234567890))
+SHORTLINK = False  # Set True if you use shortlink
 
-# ===========================
-# Logging
-# ===========================
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = Client("FFMPEGBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ===========================
-# Helper: Run FFmpeg
-# ===========================
-def run_ffmpeg(input_path, output_path, bitrate="128k"):
-    """
-    Convert video ensuring MP4 + AAC audio.
-    Keeps all audio tracks.
-    """
-    input_path = str(input_path)
-    output_path = str(Path(output_path).with_suffix(".mp4"))
-
-    cmd = [
-        "ffmpeg", "-y", "-i", input_path,
-        "-map", "0:v", "-map", "0:a?",  # all video + all audio
-        "-c:v", "copy", "-c:a", "aac", "-b:a", bitrate,
-        "-movflags", "+faststart",
-        output_path
-    ]
-
-    logger.info(f"Running ffmpeg: {' '.join(cmd)}")
-    process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    if process.returncode != 0:
-        err = process.stderr.decode(errors="ignore")
-        raise RuntimeError(f"ffmpeg failed: {err}")
-
-    return output_path
-
-# ===========================
-# Pyrogram Bot
-# ===========================
-@Client.on_message(filters.command("start") & filters.private)
-async def start_handler(client, message):
+# Start command
+@app.on_message(filters.command("start") & filters.private)
+async def start(client, message):
+    rm = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]]
+    )
     await message.reply_text(
-        "👋 Welcome!\n\nSend me a video file (MKV, MP4, etc) "
-        "and I’ll give you streaming & download links.",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("📢 Updates", url="https://t.me/trendi_Backup")]]
-        )
+        f"Hello {message.from_user.mention}! Send me a video or MKV file to process and stream.",
+        reply_markup=rm,
+        parse_mode=enums.ParseMode.HTML
     )
 
-@Client.on_message(filters.private & (filters.video | filters.document))
-async def video_handler(client, message):
-    try:
-        msg = await message.reply_text("⬇️ Downloading your file...")
+# Handle files
+@app.on_message(filters.private & (filters.video | filters.document))
+async def handle_file(client, message):
+    media = message.document or message.video
+    file_name = media.file_name
+    file_size = humanize.naturalsize(media.file_size)
+    file_id = media.file_id
 
-        # Download file
-        file_path = await message.download()
-        logger.info(f"Downloaded file: {file_path}")
+    # Download file
+    temp_path = f"downloads/{file_name}"
+    os.makedirs("downloads", exist_ok=True)
+    await message.reply_text(f"⏳ Downloading {file_name} ...")
+    await client.download_media(media, file_name=temp_path)
 
-        # Output path
-        output_path = f"converted_{os.path.basename(file_path)}"
-        output_path = str(Path(output_path).with_suffix(".mp4"))
+    # Convert with FFmpeg (multi-audio support)
+    output_file = f"converted/{file_name}"
+    os.makedirs("converted", exist_ok=True)
+    await message.reply_text(f"🔄 Processing {file_name} ... (multi-audio supported)")
+    
+    ffmpeg_cmd = [
+        "ffmpeg", "-i", temp_path,
+        "-map", "0:v", "-map", "0:a?",  # preserve all audio tracks
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-strict", "-2",
+        output_file
+    ]
+    process = await asyncio.create_subprocess_exec(*ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    await process.communicate()
 
-        await msg.edit("🎬 Converting with FFmpeg (keeping all audio tracks)...")
+    # Send links (for simplicity, local path used)
+    stream_link = f"{URL}/watch/{quote_plus(file_name)}"
+    download_link = f"{URL}/download/{quote_plus(file_name)}"
 
-        # Run FFmpeg
-        loop = asyncio.get_event_loop()
-        converted_path = await loop.run_in_executor(None, run_ffmpeg, file_path, output_path)
+    rm = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🖥 Watch online", url=stream_link)],
+            [InlineKeyboardButton("📥 Download", url=download_link)]
+        ]
+    )
 
-        await msg.edit("✅ Conversion done! Preparing links...")
+    await message.reply_text(
+        f"✅ Your link is ready!\n\n📂 File: {file_name}\n⚙️ Size: {file_size}",
+        reply_markup=rm
+    )
 
-        # Generate dummy links (replace with your server)
-        file_name = os.path.basename(converted_path)
-        base_url = "https://goflixlink.onrender.com/watch"
-        stream_link = f"{base_url}/{file_name}"
-        download_link = f"{base_url}/{file_name}?download=1"
-
-        # Send buttons
-        await message.reply_text(
-            f"✅ Your link is ready!\n\n📂 File: {file_name}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("▶️ Stream", url=stream_link)],
-                [InlineKeyboardButton("⬇️ Download", url=download_link)]
-            ])
-        )
-
-        await msg.delete()
-
-        # Cleanup original
-        os.remove(file_path)
-
-    except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
-        await message.reply_text(f"❌ Error: {e}")
+if __name__ == "__main__":
+    app.run()
