@@ -1,66 +1,66 @@
-# ffmpeg_utils.py
-import subprocess
-from pathlib import Path
-import json
+import os
+import asyncio
+import ffmpeg
 
-def ffprobe_streams(path):
+
+async def ensure_multi_audio_mp4(input_path: str, output_path: str) -> str:
     """
-    Returns the streams information of a media file as a JSON dict.
+    Convert any video to MP4 (H.264) while keeping ALL audio/subtitle tracks.
+    Output will be faststart enabled for streaming.
+
+    :param input_path: Path to input video file
+    :param output_path: Path where converted video will be saved
+    :return: Path to the converted file
     """
-    cmd = ["ffprobe", "-v", "error", "-show_streams", "-print_format", "json", str(path)]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if p.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {p.stderr.decode(errors='ignore')}")
-    return json.loads(p.stdout or b"{}")
+    try:
+        # Remove old output file if exists
+        if os.path.exists(output_path):
+            os.remove(output_path)
 
-def has_audio_stream(path):
-    info = ffprobe_streams(path)
-    return any(s.get("codec_type") == "audio" for s in info.get("streams", []))
-
-def ensure_multi_audio_mp4(input_path, bitrate="128k"):
-    """
-    Converts input media to MP4, keeping all video and audio streams.
-    Audio will be transcoded to AAC if not already.
-    Returns the output file path.
-    """
-    input_path = str(input_path)
-    output_path = str(Path(input_path).with_suffix(".mp4"))
-
-    # ffprobe info
-    info = ffprobe_streams(input_path)
-    streams = info.get("streams", [])
-    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
-
-    if not audio_streams:
-        # No audio, just copy video
+        # Build ffmpeg command
         cmd = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-c:v", "copy",
-            "-movflags", "+faststart",
+            "ffmpeg",
+            "-y",                     # overwrite if file exists
+            "-i", input_path,         # input file
+            "-map", "0:v",            # include all video tracks
+            "-map", "0:a?",           # include all audio tracks
+            "-map", "0:s?",           # include all subtitle tracks
+            "-c:v", "libx264",        # re-encode video to H.264 for compatibility
+            "-c:a", "aac",            # convert audio to AAC
+            "-c:s", "copy",           # keep subtitles as is
+            "-movflags", "+faststart",# make file streamable
+            "-preset", "veryfast",    # faster conversion
             output_path
         ]
-    else:
-        # Map all streams
-        cmd = ["ffmpeg", "-y", "-i", input_path]
 
-        # Map all streams explicitly
-        cmd += ["-map", "0"]
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
 
-        # Video: copy
-        cmd += ["-c:v", "copy"]
+        stdout, stderr = await process.communicate()
 
-        # Audio: transcode to AAC for compatibility
-        cmd += ["-c:a", "aac", "-b:a", bitrate]
+        if process.returncode != 0:
+            raise Exception(f"ffmpeg error: {stderr.decode()}")
 
-        # Faststart for streaming
-        cmd += ["-movflags", "+faststart"]
+        return output_path
 
-        # Output path
-        cmd += [output_path]
+    except Exception as e:
+        raise RuntimeError(f"Failed to convert file: {e}")
 
-    # Run ffmpeg
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if p.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {p.stderr.decode(errors='ignore')}")
 
-    return output_path
+# For quick testing
+if __name__ == "__main__":
+    import sys
+    import asyncio
+
+    if len(sys.argv) < 3:
+        print("Usage: python ffmpeg_utils.py input.mp4 output.mp4")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+
+    asyncio.run(ensure_multi_audio_mp4(input_file, output_file))
+    print(f"✅ Conversion complete: {output_file}")
