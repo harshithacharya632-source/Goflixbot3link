@@ -1,60 +1,37 @@
-import os
-import asyncio
+import subprocess
+from pathlib import Path
 
-
-async def ensure_multi_audio_mp4(input_path: str, output_path: str) -> str:
-    """
-    Convert any video to MP4 (H.264) while keeping ALL audio and subtitle tracks.
-    Makes output faststart-enabled for streaming.
-    """
-
-    try:
-        # Remove old output if exists
-        if os.path.exists(output_path):
-            os.remove(output_path)
-
-        # ffmpeg command
-        cmd = [
-            "ffmpeg",
-            "-y",                     # overwrite if exists
-            "-i", input_path,         # input file
-            "-map", "0",              # include ALL streams (video+audio+subs)
-            "-c:v", "libx264",        # re-encode video for compatibility
-            "-c:a", "copy",           # copy ALL audio tracks without loss
-            "-c:s", "copy",           # copy ALL subtitle tracks
-            "-movflags", "+faststart",# streamable file
-            "-preset", "veryfast",    # speed up encoding
-            output_path
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+def run_ffmpeg(cmd):
+    process = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    if process.returncode != 0:
+        raise RuntimeError(
+            f"FFmpeg failed:\n{process.stderr.decode(errors='ignore')}"
         )
+    return process
 
-        stdout, stderr = await process.communicate()
+def generate_hls(input_path, output_dir):
+    """
+    Convert input video into HLS with multiple audio tracks.
+    """
+    input_path = str(input_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        if process.returncode != 0:
-            raise Exception(f"ffmpeg error: {stderr.decode()}")
+    master_playlist = output_dir / "master.m3u8"
 
-        return output_path
+    cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-map", "0:v:0", "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
+        "-map", "0:a", "-c:a", "aac", "-b:a", "128k",
+        "-map", "0:s?", "-c:s", "copy",
+        "-start_number", "0",
+        "-hls_time", "6",
+        "-hls_list_size", "0",
+        "-master_pl_name", "master.m3u8",
+        f"{output_dir}/stream_%v.m3u8"
+    ]
 
-    except Exception as e:
-        raise RuntimeError(f"Failed to convert file: {e}")
-
-
-# Standalone test runner
-if __name__ == "__main__":
-    import sys
-    import asyncio
-
-    if len(sys.argv) < 3:
-        print("Usage: python ffmpeg_utils.py input.mkv output.mp4")
-        sys.exit(1)
-
-    in_file = sys.argv[1]
-    out_file = sys.argv[2]
-
-    asyncio.run(ensure_multi_audio_mp4(in_file, out_file))
-    print(f"✅ Done: {out_file}")
+    run_ffmpeg(cmd)
+    return master_playlist
