@@ -3,16 +3,15 @@ import asyncio
 import humanize
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from urllib.parse import quote_plus
+import subprocess
 
-# ===== CONFIG =====
 API_ID = int(os.environ.get("API_ID", "YOUR_API_ID"))
-API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
+API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN"))
 URL = os.environ.get("URL", "https://goflixlink.onrender.com")
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1001234567890"))
-SHORTLINK = False  # True if using shortlink service
 
-# ===== CLIENT =====
 app = Client(
     "MultiAudioBot",
     api_id=API_ID,
@@ -20,78 +19,65 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# ===== START COMMAND =====
+async def convert_to_hls(file_path, output_dir):
+    """Convert video to HLS (m3u8) with all audio tracks."""
+    os.makedirs(output_dir, exist_ok=True)
+    cmd = [
+        "ffmpeg",
+        "-i", file_path,
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-map", "0",
+        "-f", "hls",
+        "-hls_time", "10",
+        "-hls_list_size", "0",
+        "-hls_segment_filename", f"{output_dir}/seg_%03d.ts",
+        f"{output_dir}/index.m3u8"
+    ]
+    process = await asyncio.create_subprocess_exec(*cmd)
+    await process.wait()
+
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-    rm = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]]
-    )
+    rm = InlineKeyboardMarkup([[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]])
     await message.reply_text(
-        f"Hello {message.from_user.mention}! Send me a video or MKV/MP4 file to generate streaming links.",
+        f"Hello {message.from_user.mention}!\nSend me a video/MKV file to generate streaming links.",
         reply_markup=rm,
         parse_mode=enums.ParseMode.HTML
     )
 
-# ===== HANDLE FILES =====
 @app.on_message(filters.private & (filters.video | filters.document))
 async def handle_file(client, message):
     media = message.document or message.video
     file_name = media.file_name
     file_size = humanize.naturalsize(media.file_size)
 
-    # Notify user
+    # Acknowledge user
     processing_msg = await message.reply_text(f"⏳ Processing `{file_name}` ...", parse_mode=enums.ParseMode.MARKDOWN)
 
-    # Create temp directories
+    # Download file locally for conversion
+    download_path = f"downloads/{file_name}"
     os.makedirs("downloads", exist_ok=True)
-    os.makedirs("converted", exist_ok=True)
+    await client.download_media(media, download_path)
 
-    input_path = os.path.join("downloads", file_name)
-    output_path = os.path.join("converted", file_name)
+    # Convert to HLS in background
+    hls_dir = f"hls/{os.path.splitext(file_name)[0]}"
+    asyncio.create_task(convert_to_hls(download_path, hls_dir))
 
-    # Download file
-    await client.download_media(media, file_name=input_path)
+    # Generate streaming links (player-ready)
+    stream_link = f"{URL}/hls/{quote_plus(os.path.splitext(file_name)[0])}/index.m3u8"
+    download_link = f"{URL}/download/{quote_plus(file_name)}"
 
-    # Convert with FFmpeg preserving all audio tracks
-    ffmpeg_cmd = [
-        "ffmpeg",
-        "-i", input_path,
-        "-map", "0:v", "-map", "0:a?",  # video + all audio
-        "-c:v", "libx264",
-        "-c:a", "aac",
-        "-strict", "-2",
-        output_path
-    ]
-
-    process = await asyncio.create_subprocess_exec(
-        *ffmpeg_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await process.communicate()
-
-    if process.returncode != 0:
-        await processing_msg.edit_text(f"❌ Failed to process `{file_name}`\nError: {stderr.decode()}")
-        return
-
-    # Generate streaming/download links
-    stream_link = f"{URL}/watch/{file_name}"
-    download_link = f"{URL}/download/{file_name}"
-
-    # Reply with buttons
-    rm = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("🖥 Watch Online", url=stream_link)],
-            [InlineKeyboardButton("📥 Download", url=download_link)]
-        ]
-    )
-
+    # Send links to user
+    rm = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖥 Watch Online", url=stream_link)],
+        [InlineKeyboardButton("📥 Download", url=download_link)]
+    ])
     await processing_msg.edit_text(
-        f"✅ Your link is ready!\n\n📂 File: `{file_name}`\n⚙️ Size: `{file_size}`",
+        f"✅ Your links are ready!\n\n📂 File: `{file_name}`\n⚙️ Size: `{file_size}`\n\n⚠️ Streaming may start after conversion completes (few minutes for large files).",
         parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=rm
     )
 
-# ===== RUN BOT =====
 if __name__ == "__main__":
     app.run()
