@@ -1,54 +1,108 @@
+import humanize
+from Script import script
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from info import URL, LOG_CHANNEL
+from info import URL, LOG_CHANNEL, SHORTLINK
 from urllib.parse import quote_plus
-from TechVJ.util.file_properties import get_name, get_hash
+from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
+from TechVJ.util.human_readable import humanbytes
 from database.users_chats_db import db
-from utils import temp
+from utils import temp, get_shortlink
+
+
+def safe_filename(name: str) -> str:
+    """
+    Fix problematic filenames for URLs.
+    Replaces spaces & unicode with underscores.
+    """
+    return "".join(
+        c if c.isalnum() or c in ("-", "_", ".") else "_"
+        for c in name
+    )
 
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     if not await db.is_user_exist(message.from_user.id):
         await db.add_user(message.from_user.id, message.from_user.first_name)
+        await client.send_message(
+            LOG_CHANNEL,
+            script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention)
+        )
     rm = InlineKeyboardMarkup(
         [[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]]
     )
     await client.send_message(
         chat_id=message.from_user.id,
-        text="👋 Hello! Send me any video or file to get stream/download links.",
+        text=script.START_TXT.format(message.from_user.mention, temp.U_NAME, temp.B_NAME),
         reply_markup=rm,
         parse_mode=enums.ParseMode.HTML
     )
+    return
 
 
-@Client.on_message(filters.private & (filters.video | filters.document))
+@Client.on_message(filters.private & (filters.document | filters.video))
 async def stream_start(client, message):
     file = getattr(message, message.media.value)
     fileid = file.file_id
+    user_id = message.from_user.id
+    username = message.from_user.mention
 
-    # forward to log channel
+    # Forward file to LOG_CHANNEL
     log_msg = await client.send_cached_media(
         chat_id=LOG_CHANNEL,
-        file_id=fileid
+        file_id=fileid,
     )
 
-    filename = get_name(log_msg)
-    stream = f"{URL}/watch/{log_msg.id}/{quote_plus(filename)}?hash={get_hash(log_msg)}"
-    download = f"{URL}/download/{log_msg.id}/{quote_plus(filename)}?hash={get_hash(log_msg)}"
+    raw_name = get_name(log_msg)
+    safe_name = safe_filename(raw_name)
 
-    # send buttons
-    buttons = InlineKeyboardMarkup(
+    # Generate links
+    if SHORTLINK is False:
+        stream = f"{URL}/watch/{str(log_msg.id)}/{quote_plus(safe_name)}?hash={get_hash(log_msg)}"
+        download = f"{URL}/download/{str(log_msg.id)}/{quote_plus(safe_name)}?hash={get_hash(log_msg)}"
+    else:
+        stream = await get_shortlink(
+            f"{URL}/watch/{str(log_msg.id)}/{quote_plus(safe_name)}?hash={get_hash(log_msg)}"
+        )
+        download = await get_shortlink(
+            f"{URL}/download/{str(log_msg.id)}/{quote_plus(safe_name)}?hash={get_hash(log_msg)}"
+        )
+
+    # Log message
+    await log_msg.reply_text(
+        text=f"•• ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ꜰᴏʀ ɪᴅ #{user_id} \n"
+             f"•• ᴜꜱᴇʀɴᴀᴍᴇ : {username} \n\n"
+             f"•• ᖴᎥᒪᗴ Nᗩᗰᴇ : {raw_name}",
+        quote=True,
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(
+            [[
+                InlineKeyboardButton("🚀 Fast Download 🚀", url=download),
+                InlineKeyboardButton("🖥 Watch online 🖥", url=stream)
+            ]]
+        )
+    )
+
+    # User buttons
+    rm = InlineKeyboardMarkup(
         [[
-            InlineKeyboardButton("🖥 Stream", url=stream),
-            InlineKeyboardButton("📥 Download", url=download)
+            InlineKeyboardButton("sᴛʀᴇᴀᴍ 🖥", url=stream),
+            InlineKeyboardButton("ᴅᴏᴡɴʟᴏᴀᴅ 📥", url=download)
         ]]
     )
 
+    # Reply to user
+    msg_text = (
+        "<i><u>𝗬𝗼𝘂𝗿 𝗟𝗶𝗻𝗸 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗲𝗱 !</u></i>\n\n"
+        f"<b>📂 Fɪʟᴇ ɴᴀᴍᴇ :</b> <i>{raw_name}</i>\n\n"
+        f"<b>📦 Fɪʟᴇ ꜱɪᴢᴇ :</b> <i>{humanbytes(get_media_file_size(message))}</i>\n\n"
+        "<b>🚸 Nᴏᴛᴇ : ʟɪɴᴋ ᴡᴏɴ'ᴛ ᴇxᴘɪʀᴇ ᴛɪʟʟ ɪ ᴅᴇʟᴇᴛᴇ</b>"
+    )
+
     await message.reply_text(
-        f"<b>✅ Your link is ready!</b>\n\n"
-        f"📂 <b>File:</b> {filename}\n\n"
-        f"🚀 Links won’t expire until deleted.",
-        reply_markup=buttons,
-        parse_mode=enums.ParseMode.HTML
+        text=msg_text,
+        quote=True,
+        disable_web_page_preview=True,
+        reply_markup=rm
     )
