@@ -1,15 +1,16 @@
 import os
 import humanize
+import tempfile
 from urllib.parse import quote_plus
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from database.users_chats_db import db
-from utils import temp, get_shortlink
 from info import URL, LOG_CHANNEL, SHORTLINK
 from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
-from TechVJ.util.human_readable import humanbytes
-from ffmpeg_utils import convert_to_hls
+from utils import temp, get_shortlink
+from utils.ffmpeg_utils import convert_to_hls, cleanup_temp
 from Script import script
+
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
@@ -19,11 +20,11 @@ async def start(client, message):
             LOG_CHANNEL,
             script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention)
         )
-    rm = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")
-        ]]
-    )
+
+    rm = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]
+    ])
+
     await client.send_message(
         chat_id=message.from_user.id,
         text=script.START_TXT.format(message.from_user.mention, temp.U_NAME, temp.B_NAME),
@@ -31,59 +32,56 @@ async def start(client, message):
         parse_mode=enums.ParseMode.HTML
     )
 
-@Client.on_message(filters.private & (filters.document | filters.video))
+
+@Client.on_message(
+    filters.private & (filters.document | filters.video | filters.animation | filters.audio)
+)
 async def stream_start(client, message):
     file = getattr(message, message.media.value)
-    fileid = file.file_id
     filename = file.file_name
     filesize = humanize.naturalsize(file.file_size)
     user_id = message.from_user.id
     username = message.from_user.mention
 
-    # Forward to LOG_CHANNEL
+    # Forward file to LOG_CHANNEL
     log_msg = await client.send_cached_media(
         chat_id=LOG_CHANNEL,
-        file_id=fileid,
+        file_id=file.file_id
     )
 
-    file_name_safe = quote_plus(get_name(log_msg))
-
-    # Generate download and stream URLs
-    if SHORTLINK:
-        stream = await get_shortlink(f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
-        download = await get_shortlink(f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
-    else:
-        stream = f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
-        download = f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
-
-    # Convert to HLS for online streaming
-    hls_dir = f"./downloads/{log_msg.id}"
-    os.makedirs(hls_dir, exist_ok=True)
-    file_path = f"./downloads/{log_msg.id}/{filename}"
+    # Temp folder per file
+    tmp_dir = tempfile.mkdtemp()
+    file_path = os.path.join(tmp_dir, filename)
     await client.download_media(message, file_path)
-    hls_file = await convert_to_hls(file_path, hls_dir)
 
-    # Send links
+    # Convert to HLS
+    try:
+        hls_file = await convert_to_hls(file_path, os.path.join(tmp_dir, "hls"))
+    except Exception as e:
+        await message.reply_text(f"❌ Error converting file: {e}")
+        cleanup_temp(tmp_dir)
+        return
+
+    file_name_safe = quote_plus(get_name(log_msg))
+    if SHORTLINK:
+        stream_url = await get_shortlink(f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
+        download_url = await get_shortlink(f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
+    else:
+        stream_url = f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
+        download_url = f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
+
     rm = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚀 Download", url=download),
-            InlineKeyboardButton("🖥 Watch Online", url=stream)
+            InlineKeyboardButton("🚀 Download", url=download_url),
+            InlineKeyboardButton("🖥 Watch Online", url=stream_url)
         ]
     ])
 
-    msg_text = (
-        f"✅ Your link is ready!\n\n"
-        f"📂 File: {filename}\n"
-        f"⚙️ Size: {filesize}\n"
-        f"🔗 Stream: {stream}\n"
-        f"📥 Download: {download}\n"
-        f"🎵 Audio: Included ✅\n"
-        f"🚨 Note: Links won't expire until deleted."
-    )
-
     await message.reply_text(
-        msg_text,
+        f"✅ Your link is ready!\n\n📂 File: {filename}\n⚙️ Size: {filesize}\n🎵 Audio: Included ✅",
         reply_markup=rm,
-        disable_web_page_preview=True,
         quote=True
     )
+
+    # Cleanup temp files after conversion
+    cleanup_temp(tmp_dir)
