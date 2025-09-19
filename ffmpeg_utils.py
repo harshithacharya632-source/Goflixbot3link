@@ -13,7 +13,7 @@ def run_ffmpeg(cmd):
 
 def generate_hls(input_path, output_dir):
     """
-    Convert input video into HLS with multiple audio tracks.
+    Convert input video into HLS keeping ALL audio tracks + subtitles.
     """
     input_path = str(input_path)
     output_dir = Path(output_dir)
@@ -23,14 +23,23 @@ def generate_hls(input_path, output_dir):
 
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
+
+        # Video
         "-map", "0:v:0", "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
-        "-map", "0:a", "-c:a", "aac", "-b:a", "128k",
+
+        # All audios
+        "-map", "0:a?", "-c:a", "aac", "-b:a", "128k",
+
+        # All subtitles
         "-map", "0:s?", "-c:s", "copy",
+
+        # HLS settings
         "-start_number", "0",
         "-hls_time", "6",
         "-hls_list_size", "0",
-        "-master_pl_name", "master.m3u8",
-        f"{output_dir}/stream_%v.m3u8"
+        "-f", "hls",
+
+        str(master_playlist)
     ]
 
     run_ffmpeg(cmd)
