@@ -1,90 +1,89 @@
 import os
-import asyncio
 import humanize
+from urllib.parse import quote_plus
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from urllib.parse import quote_plus
-import subprocess
+from database.users_chats_db import db
+from utils import temp, get_shortlink
+from info import URL, LOG_CHANNEL, SHORTLINK
+from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
+from TechVJ.util.human_readable import humanbytes
+from ffmpeg_utils import convert_to_hls
+from Script import script
 
-# === Environment Variables ===
-API_ID = int(os.environ.get("API_ID", "YOUR_API_ID"))
-API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")  # FIXED
-URL = os.environ.get("URL", "https://goflixlink.onrender.com")
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1001234567890"))
-
-app = Client(
-    "MultiAudioBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
-
-# === HLS conversion function ===
-async def convert_to_hls(file_path, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    cmd = [
-        "ffmpeg",
-        "-i", file_path,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-map", "0",
-        "-f", "hls",
-        "-hls_time", "10",
-        "-hls_list_size", "0",
-        "-hls_segment_filename", f"{output_dir}/seg_%03d.ts",
-        f"{output_dir}/index.m3u8"
-    ]
-    process = await asyncio.create_subprocess_exec(*cmd)
-    await process.wait()
-
-# === Start command ===
-@app.on_message(filters.command("start") & filters.private)
+@Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
+    if not await db.is_user_exist(message.from_user.id):
+        await db.add_user(message.from_user.id, message.from_user.first_name)
+        await client.send_message(
+            LOG_CHANNEL,
+            script.LOG_TEXT_P.format(message.from_user.id, message.from_user.mention)
+        )
     rm = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]]
+        [[
+            InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")
+        ]]
     )
-    await message.reply_text(
-        f"Hello {message.from_user.mention}!\nSend me a video/MKV file to generate streaming links.",
+    await client.send_message(
+        chat_id=message.from_user.id,
+        text=script.START_TXT.format(message.from_user.mention, temp.U_NAME, temp.B_NAME),
         reply_markup=rm,
         parse_mode=enums.ParseMode.HTML
     )
 
-# === Handle incoming files ===
-@app.on_message(filters.private & (filters.video | filters.document))
-async def handle_file(client, message):
-    media = message.document or message.video
-    file_name = media.file_name
-    file_size = humanize.naturalsize(media.file_size)
+@Client.on_message(filters.private & (filters.document | filters.video))
+async def stream_start(client, message):
+    file = getattr(message, message.media.value)
+    fileid = file.file_id
+    filename = file.file_name
+    filesize = humanize.naturalsize(file.file_size)
+    user_id = message.from_user.id
+    username = message.from_user.mention
 
-    # Acknowledge user
-    processing_msg = await message.reply_text(
-        f"⏳ Processing `{file_name}` ...", parse_mode=enums.ParseMode.MARKDOWN
+    # Forward to LOG_CHANNEL
+    log_msg = await client.send_cached_media(
+        chat_id=LOG_CHANNEL,
+        file_id=fileid,
     )
 
-    # Download file locally
-    download_path = f"downloads/{file_name}"
-    os.makedirs("downloads", exist_ok=True)
-    await client.download_media(media, download_path)
+    file_name_safe = quote_plus(get_name(log_msg))
 
-    # Convert to HLS in background
-    hls_dir = f"hls/{os.path.splitext(file_name)[0]}"
-    asyncio.create_task(convert_to_hls(download_path, hls_dir))
+    # Generate download and stream URLs
+    if SHORTLINK:
+        stream = await get_shortlink(f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
+        download = await get_shortlink(f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
+    else:
+        stream = f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
+        download = f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
 
-    # Generate streaming & download links
-    stream_link = f"{URL}/hls/{quote_plus(os.path.splitext(file_name)[0])}/index.m3u8"
-    download_link = f"{URL}/download/{quote_plus(file_name)}"
+    # Convert to HLS for online streaming
+    hls_dir = f"./downloads/{log_msg.id}"
+    os.makedirs(hls_dir, exist_ok=True)
+    file_path = f"./downloads/{log_msg.id}/{filename}"
+    await client.download_media(message, file_path)
+    hls_file = await convert_to_hls(file_path, hls_dir)
 
-    # Send links to user
+    # Send links
     rm = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🖥 Watch Online", url=stream_link)],
-        [InlineKeyboardButton("📥 Download", url=download_link)]
+        [
+            InlineKeyboardButton("🚀 Download", url=download),
+            InlineKeyboardButton("🖥 Watch Online", url=stream)
+        ]
     ])
-    await processing_msg.edit_text(
-        f"✅ Your links are ready!\n\n📂 File: `{file_name}`\n⚙️ Size: `{file_size}`\n\n⚠️ Streaming may start after conversion completes (few minutes for large files).",
-        parse_mode=enums.ParseMode.MARKDOWN,
-        reply_markup=rm
+
+    msg_text = (
+        f"✅ Your link is ready!\n\n"
+        f"📂 File: {filename}\n"
+        f"⚙️ Size: {filesize}\n"
+        f"🔗 Stream: {stream}\n"
+        f"📥 Download: {download}\n"
+        f"🎵 Audio: Included ✅\n"
+        f"🚨 Note: Links won't expire until deleted."
     )
 
-if __name__ == "__main__":
-    app.run()
+    await message.reply_text(
+        msg_text,
+        reply_markup=rm,
+        disable_web_page_preview=True,
+        quote=True
+    )
