@@ -13,7 +13,8 @@ def run_ffmpeg(cmd):
 
 def generate_hls(input_path, output_dir):
     """
-    Convert input video into HLS keeping ALL audio tracks + subtitles.
+    Convert input video into HLS with ALL video + audio + subtitle tracks.
+    Each audio gets its own stream entry in the master playlist.
     """
     input_path = str(input_path)
     output_dir = Path(output_dir)
@@ -24,20 +25,22 @@ def generate_hls(input_path, output_dir):
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
 
-        # Video
+        # Copy video once
         "-map", "0:v:0", "-c:v", "libx264", "-crf", "20", "-preset", "veryfast",
 
-        # All audios
+        # Map all audio streams
         "-map", "0:a?", "-c:a", "aac", "-b:a", "128k",
 
-        # All subtitles
+        # Map subtitles if present
         "-map", "0:s?", "-c:s", "copy",
 
-        # HLS settings
+        # HLS params
         "-start_number", "0",
         "-hls_time", "6",
         "-hls_list_size", "0",
         "-f", "hls",
+
+        "-var_stream_map", "v:0 a:0 a:1 a:2 s?",
 
         str(master_playlist)
     ]
