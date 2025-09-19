@@ -8,7 +8,7 @@ import subprocess
 
 # === Environment Variables ===
 API_ID = int(os.environ.get("API_ID", "YOUR_API_ID"))
-API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH"))
+API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")  # FIXED
 URL = os.environ.get("URL", "https://goflixlink.onrender.com")
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1001234567890"))
