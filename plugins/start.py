@@ -6,9 +6,10 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from urllib.parse import quote_plus
 import subprocess
 
+# === Environment Variables ===
 API_ID = int(os.environ.get("API_ID", "YOUR_API_ID"))
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH"))
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")  # FIXED
 URL = os.environ.get("URL", "https://goflixlink.onrender.com")
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1001234567890"))
 
@@ -19,8 +20,8 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
+# === HLS conversion function ===
 async def convert_to_hls(file_path, output_dir):
-    """Convert video to HLS (m3u8) with all audio tracks."""
     os.makedirs(output_dir, exist_ok=True)
     cmd = [
         "ffmpeg",
@@ -37,15 +38,19 @@ async def convert_to_hls(file_path, output_dir):
     process = await asyncio.create_subprocess_exec(*cmd)
     await process.wait()
 
+# === Start command ===
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-    rm = InlineKeyboardMarkup([[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]])
+    rm = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("✨ Update Channel", url="https://t.me/trendi_Backup")]]
+    )
     await message.reply_text(
         f"Hello {message.from_user.mention}!\nSend me a video/MKV file to generate streaming links.",
         reply_markup=rm,
         parse_mode=enums.ParseMode.HTML
     )
 
+# === Handle incoming files ===
 @app.on_message(filters.private & (filters.video | filters.document))
 async def handle_file(client, message):
     media = message.document or message.video
@@ -53,9 +58,11 @@ async def handle_file(client, message):
     file_size = humanize.naturalsize(media.file_size)
 
     # Acknowledge user
-    processing_msg = await message.reply_text(f"⏳ Processing `{file_name}` ...", parse_mode=enums.ParseMode.MARKDOWN)
+    processing_msg = await message.reply_text(
+        f"⏳ Processing `{file_name}` ...", parse_mode=enums.ParseMode.MARKDOWN
+    )
 
-    # Download file locally for conversion
+    # Download file locally
     download_path = f"downloads/{file_name}"
     os.makedirs("downloads", exist_ok=True)
     await client.download_media(media, download_path)
@@ -64,7 +71,7 @@ async def handle_file(client, message):
     hls_dir = f"hls/{os.path.splitext(file_name)[0]}"
     asyncio.create_task(convert_to_hls(download_path, hls_dir))
 
-    # Generate streaming links (player-ready)
+    # Generate streaming & download links
     stream_link = f"{URL}/hls/{quote_plus(os.path.splitext(file_name)[0])}/index.m3u8"
     download_link = f"{URL}/download/{quote_plus(file_name)}"
 
