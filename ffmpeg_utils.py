@@ -1,35 +1,29 @@
 import os
 import asyncio
-import ffmpeg
 
 
 async def ensure_multi_audio_mp4(input_path: str, output_path: str) -> str:
     """
-    Convert any video to MP4 (H.264) while keeping ALL audio/subtitle tracks.
-    Output will be faststart enabled for streaming.
-
-    :param input_path: Path to input video file
-    :param output_path: Path where converted video will be saved
-    :return: Path to the converted file
+    Convert any video to MP4 (H.264) while keeping ALL audio and subtitle tracks.
+    Makes output faststart-enabled for streaming.
     """
+
     try:
-        # Remove old output file if exists
+        # Remove old output if exists
         if os.path.exists(output_path):
             os.remove(output_path)
 
-        # Build ffmpeg command
+        # ffmpeg command
         cmd = [
             "ffmpeg",
-            "-y",                     # overwrite if file exists
+            "-y",                     # overwrite if exists
             "-i", input_path,         # input file
-            "-map", "0:v",            # include all video tracks
-            "-map", "0:a?",           # include all audio tracks
-            "-map", "0:s?",           # include all subtitle tracks
-            "-c:v", "libx264",        # re-encode video to H.264 for compatibility
-            "-c:a", "aac",            # convert audio to AAC
-            "-c:s", "copy",           # keep subtitles as is
-            "-movflags", "+faststart",# make file streamable
-            "-preset", "veryfast",    # faster conversion
+            "-map", "0",              # include ALL streams (video+audio+subs)
+            "-c:v", "libx264",        # re-encode video for compatibility
+            "-c:a", "copy",           # copy ALL audio tracks without loss
+            "-c:s", "copy",           # copy ALL subtitle tracks
+            "-movflags", "+faststart",# streamable file
+            "-preset", "veryfast",    # speed up encoding
             output_path
         ]
 
@@ -50,17 +44,17 @@ async def ensure_multi_audio_mp4(input_path: str, output_path: str) -> str:
         raise RuntimeError(f"Failed to convert file: {e}")
 
 
-# For quick testing
+# Standalone test runner
 if __name__ == "__main__":
     import sys
     import asyncio
 
     if len(sys.argv) < 3:
-        print("Usage: python ffmpeg_utils.py input.mp4 output.mp4")
+        print("Usage: python ffmpeg_utils.py input.mkv output.mp4")
         sys.exit(1)
 
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    in_file = sys.argv[1]
+    out_file = sys.argv[2]
 
-    asyncio.run(ensure_multi_audio_mp4(input_file, output_file))
-    print(f"✅ Conversion complete: {output_file}")
+    asyncio.run(ensure_multi_audio_mp4(in_file, out_file))
+    print(f"✅ Done: {out_file}")
