@@ -4,17 +4,23 @@ import humanize
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Config
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# ===== CONFIG =====
+API_ID = int(os.environ.get("API_ID", "YOUR_API_ID"))
+API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
 URL = os.environ.get("URL", "https://goflixlink.onrender.com")
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL"))
-SHORTLINK = False  # Use True if you have shortlink setup
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1001234567890"))
+SHORTLINK = False  # True if using shortlink service
 
-app = Client("MultiAudioBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# ===== CLIENT =====
+app = Client(
+    "MultiAudioBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
-# Start command
+# ===== START COMMAND =====
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     rm = InlineKeyboardMarkup(
@@ -26,32 +32,35 @@ async def start(client, message):
         parse_mode=enums.ParseMode.HTML
     )
 
-# Handle video/document
+# ===== HANDLE FILES =====
 @app.on_message(filters.private & (filters.video | filters.document))
 async def handle_file(client, message):
     media = message.document or message.video
     file_name = media.file_name
     file_size = humanize.naturalsize(media.file_size)
 
-    await message.reply_text(f"⏳ Processing {file_name} ...")
+    # Notify user
+    processing_msg = await message.reply_text(f"⏳ Processing `{file_name}` ...", parse_mode=enums.ParseMode.MARKDOWN)
 
-    # Download file to temp
+    # Create temp directories
     os.makedirs("downloads", exist_ok=True)
-    temp_path = os.path.join("downloads", file_name)
-    await client.download_media(media, file_name=temp_path)
-
-    # Convert file using FFmpeg to preserve all audio tracks
     os.makedirs("converted", exist_ok=True)
-    output_file = os.path.join("converted", file_name)
 
+    input_path = os.path.join("downloads", file_name)
+    output_path = os.path.join("converted", file_name)
+
+    # Download file
+    await client.download_media(media, file_name=input_path)
+
+    # Convert with FFmpeg preserving all audio tracks
     ffmpeg_cmd = [
         "ffmpeg",
-        "-i", temp_path,
-        "-map", "0:v", "-map", "0:a?",  # keep video and all audio tracks
+        "-i", input_path,
+        "-map", "0:v", "-map", "0:a?",  # video + all audio
         "-c:v", "libx264",
         "-c:a", "aac",
         "-strict", "-2",
-        output_file
+        output_path
     ]
 
     process = await asyncio.create_subprocess_exec(
@@ -62,24 +71,27 @@ async def handle_file(client, message):
     stdout, stderr = await process.communicate()
 
     if process.returncode != 0:
-        await message.reply_text(f"❌ Failed to process the file.\nError: {stderr.decode()}")
+        await processing_msg.edit_text(f"❌ Failed to process `{file_name}`\nError: {stderr.decode()}")
         return
 
-    # Generate links (replace with your real server logic)
+    # Generate streaming/download links
     stream_link = f"{URL}/watch/{file_name}"
     download_link = f"{URL}/download/{file_name}"
 
+    # Reply with buttons
     rm = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🖥 Watch online", url=stream_link)],
+            [InlineKeyboardButton("🖥 Watch Online", url=stream_link)],
             [InlineKeyboardButton("📥 Download", url=download_link)]
         ]
     )
 
-    await message.reply_text(
-        f"✅ Your link is ready!\n\n📂 File: {file_name}\n⚙️ Size: {file_size}",
+    await processing_msg.edit_text(
+        f"✅ Your link is ready!\n\n📂 File: `{file_name}`\n⚙️ Size: `{file_size}`",
+        parse_mode=enums.ParseMode.MARKDOWN,
         reply_markup=rm
     )
 
+# ===== RUN BOT =====
 if __name__ == "__main__":
     app.run()
