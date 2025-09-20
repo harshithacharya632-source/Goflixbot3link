@@ -2,139 +2,134 @@
 # Subscribe YouTube Channel For Amazing Bot @Tech_VJ
 # Ask Doubt on telegram @KingVJ01
 
-import re, math, logging, secrets, mimetypes, time
-from info import *
+import re
+import math
+import logging
+import secrets
+import mimetypes
 from aiohttp import web
 from aiohttp.http_exceptions import BadStatusLine
+from info import *
 from TechVJ.bot import multi_clients, work_loads, TechVJBot
-from TechVJ.server.exceptions import FIleNotFound, InvalidHash
+from TechVJ.server.exceptions import FileNotFound, InvalidHash
 from TechVJ import StartTime, __version__
 from TechVJ.util.custom_dl import ByteStreamer
 from TechVJ.util.time_format import get_readable_time
 from TechVJ.util.render_template import render_page
 
+logging.basicConfig(level=logging.DEBUG)
 routes = web.RouteTableDef()
-
-@routes.get("/", allow_head=True)
-async def root_route_handler(request):
-    return web.json_response("BenFilterBot")
-
-@routes.get(r"/watch/{path:\S+}", allow_head=True)
-async def stream_handler(request: web.Request):
-    try:
-        path = request.match_info["path"]
-        match = re.search(r"^([a-zA-Z0-9_-]{6})(\d+)$", path)
-        if match:
-            secure_hash = match.group(1)
-            id = int(match.group(2))
-        else:
-            id = int(re.search(r"(\d+)(?:\/\S+)?", path).group(1))
-            secure_hash = request.rel_url.query.get("hash")
-        return web.Response(text=await render_page(id, secure_hash), content_type='text/html')
-    except InvalidHash as e:
-        raise web.HTTPForbidden(text=e.message)
-    except FIleNotFound as e:
-        raise web.HTTPNotFound(text=e.message)
-    except (AttributeError, BadStatusLine, ConnectionResetError):
-        pass
-    except Exception as e:
-        logging.critical(e.with_traceback(None))
-        raise web.HTTPInternalServerError(text=str(e))
-
-@routes.get(r"/{path:\S+}", allow_head=True)
-async def stream_handler(request: web.Request):
-    try:
-        path = request.match_info["path"]
-        match = re.search(r"^([a-zA-Z0-9_-]{6})(\d+)$", path)
-        if match:
-            secure_hash = match.group(1)
-            id = int(match.group(2))
-        else:
-            id = int(re.search(r"(\d+)(?:\/\S+)?", path).group(1))
-            secure_hash = request.rel_url.query.get("hash")
-        return await media_streamer(request, id, secure_hash)
-    except InvalidHash as e:
-        raise web.HTTPForbidden(text=e.message)
-    except FIleNotFound as e:
-        raise web.HTTPNotFound(text=e.message)
-    except (AttributeError, BadStatusLine, ConnectionResetError):
-        pass
-    except Exception as e:
-        logging.critical(e.with_traceback(None))
-        raise web.HTTPInternalServerError(text=str(e))
 
 class_cache = {}
 
+# Root route
+@routes.get("/", allow_head=True)
+async def root_route_handler(request):
+    logging.debug(f"Root route accessed from {request.remote}")
+    return web.json_response("BenFilterBot")
+
+# Watch route for HTML page
+@routes.get(r"/watch/{path:\S+}", allow_head=True)
+async def watch_route_handler(request: web.Request):
+    path = request.match_info["path"]
+    logging.debug(f"Watch request for path: {path} from {request.remote}")
+    try:
+        match = re.search(r"^([a-zA-Z0-9_-]{6})(\d+)$", path)
+        if match:
+            secure_hash = match.group(1)
+            file_id = int(match.group(2))
+        else:
+            file_id = int(re.search(r"(\d+)(?:\/\S+)?", path).group(1))
+            secure_hash = request.rel_url.query.get("hash")
+        return web.Response(text=await render_page(file_id, secure_hash), content_type='text/html')
+    except InvalidHash as e:
+        raise web.HTTPForbidden(text=e.message)
+    except FileNotFound as e:
+        raise web.HTTPNotFound(text=e.message)
+    except (AttributeError, BadStatusLine, ConnectionResetError):
+        logging.warning("Temporary connection error")
+    except Exception as e:
+        logging.critical(e, exc_info=True)
+        raise web.HTTPInternalServerError(text=str(e))
+
+# General streaming route
+@routes.get(r"/{path:\S+}", allow_head=True)
+async def general_stream_handler(request: web.Request):
+    path = request.match_info["path"]
+    logging.debug(f"General stream request for path: {path} from {request.remote}")
+    try:
+        match = re.search(r"^([a-zA-Z0-9_-]{6})(\d+)$", path)
+        if match:
+            secure_hash = match.group(1)
+            file_id = int(match.group(2))
+        else:
+            file_id = int(re.search(r"(\d+)(?:\/\S+)?", path).group(1))
+            secure_hash = request.rel_url.query.get("hash")
+        return await media_streamer(request, file_id, secure_hash)
+    except InvalidHash as e:
+        raise web.HTTPForbidden(text=e.message)
+    except FileNotFound as e:
+        raise web.HTTPNotFound(text=e.message)
+    except (AttributeError, BadStatusLine, ConnectionResetError):
+        logging.warning("Temporary connection error")
+    except Exception as e:
+        logging.critical(e, exc_info=True)
+        raise web.HTTPInternalServerError(text=str(e))
+
+# Media streamer function
 async def media_streamer(request: web.Request, id: int, secure_hash: str):
-    range_header = request.headers.get("Range", 0)
-    
+    range_header = request.headers.get("Range", None)
     index = min(work_loads, key=work_loads.get)
     faster_client = multi_clients[index]
-    
-    if MULTI_CLIENT:
-        logging.info(f"Client {index} is now serving {request.remote}")
+
+    logging.debug(f"Using client {index} for request from {request.remote}")
 
     if faster_client in class_cache:
         tg_connect = class_cache[faster_client]
         logging.debug(f"Using cached ByteStreamer object for client {index}")
     else:
-        logging.debug(f"Creating new ByteStreamer object for client {index}")
         tg_connect = ByteStreamer(faster_client)
         class_cache[faster_client] = tg_connect
-    logging.debug("before calling get_file_properties")
-    file_id = await tg_connect.get_file_properties(id)
-    logging.debug("after calling get_file_properties")
+        logging.debug(f"Created new ByteStreamer object for client {index}")
+
+    file_obj = await tg_connect.get_file_properties(id)
     
-    if file_id.unique_id[:6] != secure_hash:
-        logging.debug(f"Invalid hash for message with ID {id}")
+    if file_obj.unique_id[:6] != secure_hash:
+        logging.debug(f"Invalid hash for file {id}")
         raise InvalidHash
-    
-    file_size = file_id.file_size
 
-    if range_header:
-        from_bytes, until_bytes = range_header.replace("bytes=", "").split("-")
-        from_bytes = int(from_bytes)
-        until_bytes = int(until_bytes) if until_bytes else file_size - 1
-    else:
-        from_bytes = request.http_range.start or 0
-        until_bytes = (request.http_range.stop or file_size) - 1
+    file_size = file_obj.file_size
 
-    if (until_bytes > file_size) or (from_bytes < 0) or (until_bytes < from_bytes):
-        return web.Response(
-            status=416,
-            body="416: Range not satisfiable",
-            headers={"Content-Range": f"bytes */{file_size}"},
-        )
+    from_bytes, until_bytes = 0, file_size - 1
+    if range_header and "bytes=" in range_header:
+        try:
+            parts = range_header.replace("bytes=", "").split("-")
+            from_bytes = int(parts[0])
+            until_bytes = int(parts[1]) if parts[1] else file_size - 1
+        except Exception:
+            logging.warning(f"Invalid Range header: {range_header}")
 
     chunk_size = 1024 * 1024
-    until_bytes = min(until_bytes, file_size - 1)
-
     offset = from_bytes - (from_bytes % chunk_size)
     first_part_cut = from_bytes - offset
     last_part_cut = until_bytes % chunk_size + 1
-
     req_length = until_bytes - from_bytes + 1
     part_count = math.ceil(until_bytes / chunk_size) - math.floor(offset / chunk_size)
-    body = tg_connect.yield_file(
-        file_id, index, offset, first_part_cut, last_part_cut, part_count, chunk_size
-    )
 
-    mime_type = file_id.mime_type
-    file_name = file_id.file_name
-    disposition = "attachment"
+    body = tg_connect.yield_file(file_obj, index, offset, first_part_cut, last_part_cut, part_count, chunk_size)
 
-    if mime_type:
-        if not file_name:
-            try:
-                file_name = f"{secrets.token_hex(2)}.{mime_type.split('/')[1]}"
-            except (IndexError, AttributeError):
-                file_name = f"{secrets.token_hex(2)}.unknown"
-    else:
-        if file_name:
-            mime_type = mimetypes.guess_type(file_id.file_name)
-        else:
+    mime_type = file_obj.mime_type
+    file_name = file_obj.file_name
+
+    if not mime_type:
+        mime_type, _ = mimetypes.guess_type(file_name)
+        if not mime_type:
             mime_type = "application/octet-stream"
-            file_name = f"{secrets.token_hex(2)}.unknown"
+
+    if not file_name:
+        file_name = f"{secrets.token_hex(2)}.unknown"
+
+    disposition = "attachment"
 
     return web.Response(
         status=206 if range_header else 200,
