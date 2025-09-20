@@ -6,11 +6,10 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from database.users_chats_db import db
 from info import URL, LOG_CHANNEL, SHORTLINK
-from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
+from TechVJ.util.file_properties import get_name, get_hash
 from utils import temp, get_shortlink
 from utils.ffmpeg_utils import convert_to_hls, cleanup_temp
 from Script import script
-
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
@@ -32,38 +31,45 @@ async def start(client, message):
         parse_mode=enums.ParseMode.HTML
     )
 
-
 @Client.on_message(
     filters.private & (filters.document | filters.video | filters.animation | filters.audio)
 )
 async def stream_start(client, message):
-    file = getattr(message, message.media.value)
+    # Determine file type safely
+    if message.document:
+        file = message.document
+    elif message.video:
+        file = message.video
+    elif message.audio:
+        file = message.audio
+    elif message.animation:
+        file = message.animation
+    else:
+        await message.reply_text("❌ Unsupported file type.")
+        return
+
     filename = file.file_name
     filesize = humanize.naturalsize(file.file_size)
-    user_id = message.from_user.id
-    username = message.from_user.mention
 
     # Forward file to LOG_CHANNEL
-    log_msg = await client.send_cached_media(
-        chat_id=LOG_CHANNEL,
-        file_id=file.file_id
-    )
+    log_msg = await client.send_cached_media(chat_id=LOG_CHANNEL, file_id=file.file_id)
 
-    # Temp folder per file
+    # Create temp folder
     tmp_dir = tempfile.mkdtemp()
+    os.makedirs(tmp_dir, exist_ok=True)
     file_path = os.path.join(tmp_dir, filename)
     await client.download_media(message, file_path)
 
-    # Convert to HLS (multi-audio supported)
+    # Convert to HLS
     try:
         hls_path = os.path.join(tmp_dir, "hls")
-        await convert_to_hls(file_path, hls_path)
+        master_playlist = await convert_to_hls(file_path, hls_path)
     except Exception as e:
         await message.reply_text(f"❌ Error converting file: {e}")
         cleanup_temp(tmp_dir)
         return
 
-    # Prepare links
+    # Shortlinks
     file_name_safe = quote_plus(get_name(log_msg))
     if SHORTLINK:
         stream_url = await get_shortlink(f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}")
@@ -72,7 +78,6 @@ async def stream_start(client, message):
         stream_url = f"{URL}/watch/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
         download_url = f"{URL}/download/{log_msg.id}/{file_name_safe}?hash={get_hash(log_msg)}"
 
-    # Buttons only (hide raw links)
     buttons = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🚀 Download", url=download_url),
@@ -86,5 +91,5 @@ async def stream_start(client, message):
         quote=True
     )
 
-    # Cleanup temp files
-    cleanup_temp(tmp_dir)
+    # Optionally, cleanup after 5 minutes (if HLS is temporary)
+    # asyncio.create_task(async_cleanup(tmp_dir, delay=300))
