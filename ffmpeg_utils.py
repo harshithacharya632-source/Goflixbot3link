@@ -2,62 +2,46 @@ import os
 import shutil
 import asyncio
 import subprocess
+from pathlib import Path
 
-# Allowed video/audio extensions
-ALLOWED_EXTENSIONS = (".mkv", ".mp4", ".mov", ".avi", ".webm", ".flv", ".mp3", ".aac", ".wav", ".ogg")
-
-async def convert_to_hls(input_file: str, output_dir: str) -> str:
+async def convert_to_hls(input_file: str, output_dir: str):
     """
-    Convert a video/audio file to HLS (.m3u8) format.
-    Returns path to the main playlist (.m3u8).
+    Convert any media file to HLS format with multiple audio tracks support.
+    Returns the path to the main playlist.m3u8.
     """
-    # Check extension
-    if not input_file.lower().endswith(ALLOWED_EXTENSIONS):
-        raise ValueError(f"Unsupported file type: {input_file}")
+    os.makedirs(output_dir, exist_ok=True)
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    input_path = Path(input_file)
+    output_path = Path(output_dir) / "playlist.m3u8"
 
-    # Output HLS playlist path
-    base_name = os.path.splitext(os.path.basename(input_file))[0]
-    playlist_path = os.path.join(output_dir, f"{base_name}.m3u8")
-
-    # FFmpeg command
-    # - Use copy codecs for faster processing if compatible
-    # - Handle multi-audio streams
+    # FFmpeg command: multi-audio HLS
     cmd = [
         "ffmpeg",
-        "-y",  # overwrite
-        "-i", input_file,
-        "-map", "0",  # include all streams
-        "-c:v", "libx264",
-        "-c:a", "aac",
+        "-i", str(input_path),
+        "-codec:", "copy",       # copy streams without re-encoding
+        "-map", "0",             # map all streams
         "-f", "hls",
         "-hls_time", "10",
         "-hls_playlist_type", "vod",
-        "-hls_flags", "delete_segments+temp_file",
-        playlist_path
+        "-hls_segment_filename", str(Path(output_dir) / "segment_%03d.ts"),
+        str(output_path)
     ]
 
-    process = await asyncio.create_subprocess_exec(
+    # Run FFmpeg asynchronously
+    proc = await asyncio.create_subprocess_exec(
         *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
     )
+    stdout, stderr = await proc.communicate()
 
-    stdout, stderr = await process.communicate()
-
-    if process.returncode != 0:
+    if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg failed:\n{stderr.decode()}")
 
-    return playlist_path
+    return str(output_path)
+
 
 def cleanup_temp(temp_dir: str):
-    """
-    Remove temp directories safely.
-    """
-    try:
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-    except Exception as e:
-        print(f"Error cleaning temp directory {temp_dir}: {e}")
+    """Remove temporary folder and all its files."""
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir, ignore_errors=True)
