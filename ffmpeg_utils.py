@@ -1,50 +1,48 @@
 import os
+import shutil
 import asyncio
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from ffmpeg_utils import convert_to_hls, cleanup_temp
-from utils import get_shortlink, temp
 
 
-@Client.on_message(filters.command("start"))
-async def start(client, message):
-    await message.reply_text(
-        f"Hello {message.from_user.first_name} 👋, My Name Is File to link Goflix\n\n"
-        "✏️ I Am An Advanced File Stream Bot With Multiple Player Support And URL Shortener. Best UI Performance.\n\n"
-        "Now Send Me A Media To See Magic ✨",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("📢 Join Channel", url="https://t.me/trendi_Backup")]]
-        ),
+async def convert_to_hls(input_file: str, output_dir: str) -> str:
+    """
+    Convert video/audio file to HLS format with audio preserved.
+    Returns path to the master.m3u8 playlist file.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # HLS output path
+    output_path = os.path.join(output_dir, "master.m3u8")
+
+    # ffmpeg command (keep video + all audio, HLS output)
+    cmd = [
+        "ffmpeg",
+        "-y",                      # overwrite without asking
+        "-i", input_file,          # input file
+        "-c:v", "copy",            # copy video without re-encoding
+        "-c:a", "copy",            # copy audio without re-encoding
+        "-f", "hls",               # HLS format
+        "-hls_time", "10",         # each segment = 10s
+        "-hls_list_size", "0",     # include all segments in playlist
+        "-hls_segment_filename", os.path.join(output_dir, "segment_%03d.ts"),
+        output_path
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg failed: {stderr.decode()}")
+
+    return output_path
 
 
-@Client.on_message(filters.video | filters.document)
-async def media_handler(client, message):
-    # download file
-    file_path = await message.download()
-    msg = await message.reply_text("⚡ Converting file... Please wait!")
-
+def cleanup_temp(path: str):
+    """Remove temporary directory safely."""
     try:
-        # convert to HLS (m3u8)
-        output_dir = await convert_to_hls(file_path)
-
-        # create a sample streaming URL
-        stream_link = f"https://your-domain.com/stream/{os.path.basename(output_dir)}"
-        short_link = await get_shortlink(stream_link)
-
-        # send link back
-        await msg.edit_text(
-            f"✅ Your File Is Ready!\n\n🎬 [Click Here To Watch Online]({short_link})",
-            disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("🚀 Fast Download 🚀", url=short_link)],
-                    [InlineKeyboardButton("📢 Join Channel", url="https://t.me/trendi_Backup")],
-                ]
-            ),
-        )
+        shutil.rmtree(path, ignore_errors=True)
     except Exception as e:
-        await msg.edit_text(f"❌ Error: {e}")
-    finally:
-        # cleanup temp files
-        await cleanup_temp(file_path)
+        print(f"⚠️ Cleanup failed: {e}")
