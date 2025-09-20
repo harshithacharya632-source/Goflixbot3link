@@ -1,90 +1,50 @@
 import os
 import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
-
-TEMP_DIR = "temp"  # folder for HLS/MP4
-os.makedirs(TEMP_DIR, exist_ok=True)
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from ffmpeg_utils import convert_to_hls, cleanup_temp
+from utils import get_shortlink, temp
 
 
-async def convert_to_hls(input_file: str, output_name: str) -> str:
-    """
-    Convert video to HLS (.m3u8) format asynchronously.
-    Returns the path to the generated .m3u8 file.
-    """
-    output_dir = os.path.join(TEMP_DIR, output_name)
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "index.m3u8")
-
-    # ✅ Skip if already exists
-    if os.path.exists(output_path):
-        logger.info(f"HLS already exists for {input_file}")
-        return output_path
-
-    cmd = [
-        "ffmpeg", "-i", input_file,
-        "-c:v", "libx264", "-c:a", "aac",
-        "-preset", "veryfast", "-f", "hls",
-        "-hls_time", "10", "-hls_playlist_type", "vod",
-        output_path
-    ]
-
-    logger.info(f"Running FFmpeg: {' '.join(cmd)}")
-
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+@Client.on_message(filters.command("start"))
+async def start(client, message):
+    await message.reply_text(
+        f"Hello {message.from_user.first_name} 👋, My Name Is File to link Goflix\n\n"
+        "✏️ I Am An Advanced File Stream Bot With Multiple Player Support And URL Shortener. Best UI Performance.\n\n"
+        "Now Send Me A Media To See Magic ✨",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("📢 Join Channel", url="https://t.me/trendi_Backup")]]
+        ),
     )
-    stdout, stderr = await process.communicate()
-
-    if process.returncode != 0:
-        logger.error(f"FFmpeg failed: {stderr.decode()}")
-        raise Exception("FFmpeg conversion failed")
-
-    return output_path
 
 
-async def convert_to_mp4(input_file: str, output_name: str) -> str:
-    """
-    Convert video to MP4 format asynchronously.
-    Returns the path to the generated MP4 file.
-    """
-    output_path = os.path.join(TEMP_DIR, f"{output_name}.mp4")
+@Client.on_message(filters.video | filters.document)
+async def media_handler(client, message):
+    # download file
+    file_path = await message.download()
+    msg = await message.reply_text("⚡ Converting file... Please wait!")
 
-    # ✅ Skip if already exists
-    if os.path.exists(output_path):
-        logger.info(f"MP4 already exists for {input_file}")
-        return output_path
+    try:
+        # convert to HLS (m3u8)
+        output_dir = await convert_to_hls(file_path)
 
-    cmd = [
-        "ffmpeg", "-i", input_file,
-        "-c:v", "libx264", "-c:a", "aac",
-        "-preset", "veryfast", "-movflags", "+faststart",
-        output_path
-    ]
+        # create a sample streaming URL
+        stream_link = f"https://your-domain.com/stream/{os.path.basename(output_dir)}"
+        short_link = await get_shortlink(stream_link)
 
-    logger.info(f"Running FFmpeg: {' '.join(cmd)}")
-
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await process.communicate()
-
-    if process.returncode != 0:
-        logger.error(f"FFmpeg failed: {stderr.decode()}")
-        raise Exception("FFmpeg conversion failed")
-
-    return output_path
-
-
-def cleanup_temp():
-    """ Delete all files in temp folder """
-    import shutil
-    if os.path.exists(TEMP_DIR):
-        shutil.rmtree(TEMP_DIR)
-        os.makedirs(TEMP_DIR, exist_ok=True)
-        logger.info("Temp folder cleaned.")
+        # send link back
+        await msg.edit_text(
+            f"✅ Your File Is Ready!\n\n🎬 [Click Here To Watch Online]({short_link})",
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("🚀 Fast Download 🚀", url=short_link)],
+                    [InlineKeyboardButton("📢 Join Channel", url="https://t.me/trendi_Backup")],
+                ]
+            ),
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Error: {e}")
+    finally:
+        # cleanup temp files
+        await cleanup_temp(file_path)
