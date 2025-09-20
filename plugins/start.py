@@ -8,7 +8,7 @@ from database.users_chats_db import db
 from info import URL, LOG_CHANNEL, SHORTLINK
 from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
 from utils import temp, get_shortlink
-from ffmpeg_utils import convert_to_hls, cleanup_temp   # ✅ fixed import
+from ffmpeg_utils import convert_to_hls, cleanup_temp
 from Script import script
 
 
@@ -70,10 +70,9 @@ async def stream_start(client, message):
 
     rm = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🖥 Watch Online", url=stream_url),
-            InlineKeyboardButton("🚀 Download", url=download_url)
-        ],
-        [InlineKeyboardButton("📢 Join Channel", url="https://t.me/trendi_Backup")]
+            InlineKeyboardButton("🚀 Download", url=download_url),
+            InlineKeyboardButton("🖥 Watch Online", url=stream_url)
+        ]
     ])
 
     await message.reply_text(
