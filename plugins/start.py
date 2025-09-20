@@ -8,7 +8,7 @@ from database.users_chats_db import db
 from info import URL, LOG_CHANNEL, SHORTLINK
 from TechVJ.util.file_properties import get_name, get_hash, get_media_file_size
 from utils import temp, get_shortlink
-from utils.ffmpeg_utils import convert_to_hls, cleanup_temp
+from ffmpeg_utils import convert_to_hls, cleanup_temp   # ✅ fixed import
 from Script import script
 
 
@@ -40,8 +40,6 @@ async def stream_start(client, message):
     file = getattr(message, message.media.value)
     filename = file.file_name
     filesize = humanize.naturalsize(file.file_size)
-    user_id = message.from_user.id
-    username = message.from_user.mention
 
     # Forward file to LOG_CHANNEL
     log_msg = await client.send_cached_media(
@@ -56,7 +54,7 @@ async def stream_start(client, message):
 
     # Convert to HLS
     try:
-        hls_file = await convert_to_hls(file_path, os.path.join(tmp_dir, "hls"))
+        await convert_to_hls(file_path, os.path.join(tmp_dir, "hls"))
     except Exception as e:
         await message.reply_text(f"❌ Error converting file: {e}")
         cleanup_temp(tmp_dir)
@@ -72,16 +70,20 @@ async def stream_start(client, message):
 
     rm = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚀 Download", url=download_url),
-            InlineKeyboardButton("🖥 Watch Online", url=stream_url)
-        ]
+            InlineKeyboardButton("🖥 Watch Online", url=stream_url),
+            InlineKeyboardButton("🚀 Download", url=download_url)
+        ],
+        [InlineKeyboardButton("📢 Join Channel", url="https://t.me/trendi_Backup")]
     ])
 
     await message.reply_text(
-        f"✅ Your link is ready!\n\n📂 File: {filename}\n⚙️ Size: {filesize}\n🎵 Audio: Included ✅",
+        f"✅ Your link is ready!\n\n"
+        f"📂 File: {filename}\n"
+        f"⚙️ Size: {filesize}\n"
+        f"🎵 Audio: Included ✅",
         reply_markup=rm,
         quote=True
     )
 
-    # Cleanup temp files after conversion
+    # Cleanup temp files
     cleanup_temp(tmp_dir)
