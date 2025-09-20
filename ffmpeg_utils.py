@@ -1,38 +1,44 @@
 import os
+import shutil
 import asyncio
 import subprocess
-import shutil
-from pathlib import Path
+
+# Allowed video/audio extensions
+ALLOWED_EXTENSIONS = (".mkv", ".mp4", ".mov", ".avi", ".webm", ".flv", ".mp3", ".aac", ".wav", ".ogg")
 
 async def convert_to_hls(input_file: str, output_dir: str) -> str:
     """
-    Converts a video/audio file to HLS format with multi-audio support.
-    
-    Args:
-        input_file (str): Path to the input media file.
-        output_dir (str): Directory where HLS segments and playlist will be saved.
-
-    Returns:
-        str: Path to the generated master playlist (.m3u8)
+    Convert a video/audio file to HLS (.m3u8) format.
+    Returns path to the main playlist (.m3u8).
     """
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "master.m3u8")
+    # Check extension
+    if not input_file.lower().endswith(ALLOWED_EXTENSIONS):
+        raise ValueError(f"Unsupported file type: {input_file}")
 
-    # Prepare ffmpeg command
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Output HLS playlist path
+    base_name = os.path.splitext(os.path.basename(input_file))[0]
+    playlist_path = os.path.join(output_dir, f"{base_name}.m3u8")
+
+    # FFmpeg command
+    # - Use copy codecs for faster processing if compatible
+    # - Handle multi-audio streams
     cmd = [
         "ffmpeg",
+        "-y",  # overwrite
         "-i", input_file,
-        "-map", "0",               # Map all streams (video + all audio)
-        "-c:v", "copy",            # Copy video codec
-        "-c:a", "aac",             # Convert audio to AAC
+        "-map", "0",  # include all streams
+        "-c:v", "libx264",
+        "-c:a", "aac",
         "-f", "hls",
-        "-hls_time", "6",          # Segment length in seconds
+        "-hls_time", "10",
         "-hls_playlist_type", "vod",
-        "-hls_segment_filename", os.path.join(output_dir, "seg_%03d.ts"),
-        output_file
+        "-hls_flags", "delete_segments+temp_file",
+        playlist_path
     ]
 
-    # Run FFmpeg asynchronously
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -44,15 +50,14 @@ async def convert_to_hls(input_file: str, output_dir: str) -> str:
     if process.returncode != 0:
         raise RuntimeError(f"FFmpeg failed:\n{stderr.decode()}")
 
-    return output_file
+    return playlist_path
 
-
-def cleanup_temp(path: str):
+def cleanup_temp(temp_dir: str):
     """
-    Remove a temporary folder safely.
-    
-    Args:
-        path (str): Folder path to remove.
+    Remove temp directories safely.
     """
-    if os.path.exists(path):
-        shutil.rmtree(path, ignore_errors=True)
+    try:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+    except Exception as e:
+        print(f"Error cleaning temp directory {temp_dir}: {e}")
