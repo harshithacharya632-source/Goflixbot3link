@@ -6,42 +6,53 @@ from pathlib import Path
 
 async def convert_to_hls(input_file: str, output_dir: str):
     """
-    Convert any media file to HLS format with multiple audio tracks support.
-    Returns the path to the main playlist.m3u8.
+    Convert a video/audio file to HLS format with multi-audio support.
+    
+    Args:
+        input_file (str): Path to the input media file.
+        output_dir (str): Path to the directory where HLS segments will be saved.
+        
+    Returns:
+        str: Path to the HLS master playlist.
     """
     os.makedirs(output_dir, exist_ok=True)
-
-    input_path = Path(input_file)
-    output_path = Path(output_dir) / "playlist.m3u8"
-
-    # FFmpeg command: multi-audio HLS
+    master_playlist = os.path.join(output_dir, "master.m3u8")
+    
+    # ffmpeg command for HLS with multi-audio support
     cmd = [
         "ffmpeg",
-        "-i", str(input_path),
-        "-codec:", "copy",       # copy streams without re-encoding
-        "-map", "0",             # map all streams
+        "-i", input_file,
+        "-map", "0:v",               # map all video streams
+        "-map", "0:a?",              # map all audio streams if present
+        "-c:v", "copy",
+        "-c:a", "aac",
         "-f", "hls",
         "-hls_time", "10",
-        "-hls_playlist_type", "vod",
-        "-hls_segment_filename", str(Path(output_dir) / "segment_%03d.ts"),
-        str(output_path)
+        "-hls_list_size", "0",
+        "-hls_segment_filename", os.path.join(output_dir, "segment_%03d.ts"),
+        master_playlist
     ]
 
-    # Run FFmpeg asynchronously
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
+
     stdout, stderr = await proc.communicate()
 
     if proc.returncode != 0:
-        raise RuntimeError(f"FFmpeg failed:\n{stderr.decode()}")
+        raise Exception(f"FFmpeg failed:\n{stderr.decode()}")
 
-    return str(output_path)
+    return master_playlist
 
 
 def cleanup_temp(temp_dir: str):
-    """Remove temporary folder and all its files."""
+    """
+    Remove temporary directory and its contents.
+    
+    Args:
+        temp_dir (str): Path to temporary directory.
+    """
     if os.path.exists(temp_dir):
         shutil.rmtree(temp_dir, ignore_errors=True)
